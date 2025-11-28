@@ -163,3 +163,45 @@ class domainnet(iData):
             labels += list(aa[:, 1])
         self.test_data = np.array(["./data/DomainNet/" + x for x in files])
         self.test_targets = np.array([int(x) for x in labels])
+
+
+class DGFSCIL(iData):
+    use_path = True
+    train_trsf = build_transform(True, None)
+    test_trsf = build_transform(False, None)
+    common_trsf = []
+
+    class_order = np.arange(345).tolist()
+
+    def __init__(self, inc, use_iput_norm):
+        self.inc = inc
+        if use_iput_norm:
+            self.common_trsf = [
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ]
+
+    def download_data(self):
+        # aa = np.loadtxt("./data/DomainNet/fs/" + self.inc + "_train.txt", dtype="str")
+        # self.train_data = np.array(["./data/DomainNet/" + x for x in aa[:, 0]])
+        # self.train_targets = np.array([int(x) for x in aa[:, 1]])
+
+        dil_tasks = ["real", "infograph", "painting", "sketch"]
+
+        files = []
+        labels = []
+        for task in dil_tasks:
+            aa = np.loadtxt("./data/DomainNet/fs/" + task + "_train.txt", dtype="str")
+            files += list(aa[:, 0])
+            labels += list(aa[:, 1])
+        self.train_data = np.array(["./data/DomainNet/" + x for x in files])
+        self.train_targets = np.array([int(x) for x in labels])
+
+        dil_tasks = ["clipart", "quickdraw"]
+        files = []
+        labels = []
+        for task in dil_tasks:
+            aa = np.loadtxt("./data/DomainNet/fs/" + task + "_test.txt", dtype="str")
+            files += list(aa[:, 0])
+            labels += list(aa[:, 1])
+        self.test_data = np.array(["./data/DomainNet/" + x for x in files])
+        self.test_targets = np.array([int(x) for x in labels])

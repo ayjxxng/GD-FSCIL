@@ -3,7 +3,7 @@ import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
-from utils.data import iCIFAR224, iImageNetA, domainnet
+from utils.data import iCIFAR224, iImageNetA, domainnet, DGFSCIL
 
 
 class DataManager(object):
@@ -100,7 +100,7 @@ class DataManager(object):
         else:
             np.random.seed(seed)
             self._class_order = np.arange(345).tolist()
-            logging.info("Class Order: [" + ",".join([str(x) for x in self._class_order]) + "]")
+            # logging.info("Class Order: [" + ",".join([str(x) for x in self._class_order]) + "]")
 
     def _select(self, x, y, low_range, high_range):
         idxes = np.where(np.logical_and(y >= low_range, y < high_range))[0]
@@ -144,7 +144,8 @@ def _get_idata(dataset_name, use_input_norm):
         return iImageNetA(use_input_norm)
     elif "domainnet" in name:
         logging.info("Starting next DIL task: " + name)
-        return domainnet(name[10::], use_input_norm)
+        # return domainnet(name[10::], use_input_norm)
+        return DGFSCIL(name[10::], use_input_norm)
     else:
         raise NotImplementedError("Unknown dataset {}.".format(dataset_name))
 

@@ -305,12 +305,13 @@ class Learner(BaseLearner):
             self._network.update_fc(
                 self._classes_seen_so_far
             )  # creates a new head with a new number of classes (if CIL)
-        if self.is_dil == False:
+        if not self.is_dil:
             logging.info("Starting CIL Task {}".format(self._cur_task + 1))
         logging.info(
             "Learning on classes {}-{}".format(self._known_classes, self._classes_seen_so_far - 1)
         )
         self.class_increments.append([self._known_classes, self._classes_seen_so_far - 1])
+
         self.train_dataset = data_manager.get_dataset(
             np.arange(self._known_classes, self._classes_seen_so_far),
             source="train",
@@ -433,7 +434,7 @@ class Learner(BaseLearner):
             self.show_num_params()
         else:
             # this branch is either CP updates only, or SGD on a PETL method first task only
-            if self._cur_task == 0 and self.dil_init == False:
+            if self._cur_task == 0 and not self.dil_init:
                 if "ssf" in self.args["convnet_type"]:
                     self.freeze_backbone(is_first_session=True)
                 if self.args["model_name"] != "ncm":
@@ -458,15 +459,16 @@ class Learner(BaseLearner):
                     self.freeze_backbone()
                     print("freezed model for test")
 
-                if self.args["merge_result"] or not self.args["follow_model_ptm"]:
+                # if self.args["merge_result"] or not self.args["follow_model_ptm"]:
+                if self.args["merge_result"]:
                     self.model_branch1 = copy.deepcopy(self._network).to(self._device)
 
-                if self.args["use_RP"] and self.dil_init == False:
+                if self.args["use_RP"] and not self.dil_init:
                     self.setup_RP()
                     if self.args["merge_result"]:
                         self.setup_RP_branch()
 
-            elif self._cur_task > 0 and self.dil_init == False:
+            elif self._cur_task > 0 and not self.dil_init:
                 if self.args["follow_epoch"]:
                     if "ssf" in self.args["convnet_type"]:
                         self.freeze_backbone(is_first_session=True)
@@ -483,18 +485,18 @@ class Learner(BaseLearner):
                             optimizer, T_max=self.args["tuned_epoch"], eta_min=self.min_lr
                         )
                         logging.info(
-                            "Starting PETL training on first task using "
+                            f"Starting PETL training on {self._cur_task} task using "
                             + self.args["model_name"]
                             + " method"
                         )
                         self._follow_train(train_loader, test_loader, optimizer, scheduler)
 
-                if self.args["use_RP"] and self.dil_init == False:
+                if self.args["use_RP"] and not self.dil_init:
                     self.setup_RP_follow()
                     if self.args["merge_result"]:
                         self.setup_RP_follow_branch()
 
-            if self.is_dil and self.dil_init == False:
+            if self.is_dil and not self.dil_init:
                 self.dil_init = True
                 self._network.fc.weight.data.fill_(0.0)
 
@@ -564,6 +566,7 @@ class Learner(BaseLearner):
         self.train_fc_branch = copy.deepcopy(self.model_branch1.fc.weight)
 
     def _init_train(self, train_loader, test_loader, optimizer, scheduler):
+        """Slow learning"""
         prog_bar = tqdm(range(int(self.args["tuned_epoch"])))
         for _, epoch in enumerate(prog_bar):
             self._network.train()
@@ -604,6 +607,7 @@ class Learner(BaseLearner):
         logging.info(info)
 
     def _follow_train(self, train_loader, test_loader, optimizer, scheduler):
+        """Fast learning"""
         prog_bar = tqdm(range(int(self.args["follow_epoch"])))
         for _, epoch in enumerate(prog_bar):
             self._network.train()

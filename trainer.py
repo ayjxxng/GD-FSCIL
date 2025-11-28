@@ -66,11 +66,12 @@ def _train(args):
         num_tasks = len(dil_tasks)
         model.topk = 2
         model.is_dil = True
-    elif args["dataset"] == "domainnet":
-        ds = "domainnet_real"
-        dil_tasks = ["real", "quickdraw", "painting", "sketch", "infograph", "clipart"]
-        num_tasks = len(dil_tasks)
-        model.is_dil = True
+    # elif args["dataset"] == "domainnet":
+    #     ds = "domainnet_real"
+    #     dil_tasks = ["real", "infograph", "painting", "sketch"]
+    #     num_tasks = len(dil_tasks)
+    #     model.is_dil = True
+    #     args["increment"] = [240, 35, 35, 35]
     else:
         # cil datasets
         model.is_dil = False
@@ -98,7 +99,7 @@ def _train(args):
                 args["shuffle"],
                 args["seed"],
                 args["init_cls"],
-                args["increment"],
+                args["increment"][task],
                 use_input_norm=args["use_input_norm"],
             )
             model._cur_task = -1
