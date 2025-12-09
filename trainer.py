@@ -5,10 +5,11 @@ import os
 import pandas as pd
 import sys
 import torch
-
+import wandb
 from utils.data_manager import DataManager
 from utils.toolkit import count_parameters
 from SAFE import Learner
+from MetaSAFE import MetaLearner
 
 
 def train(args):
@@ -24,26 +25,11 @@ def train(args):
 
 
 def _train(args):
-    init_cls = 0 if args["init_cls"] == args["increment"] else args["init_cls"]
-    logs_name = "logs/{}/{}/{}/{}".format(
-        args["model_name"], args["dataset"], init_cls, args["increment"]
-    )
-    if not os.path.exists(logs_name):
-        os.makedirs(logs_name)
-    logfilename = "logs/{}/{}/{}/{}/{}_{}_{}".format(
-        args["model_name"],
-        args["dataset"],
-        init_cls,
-        args["increment"],
-        " ",
-        args["seed"],
-        args["convnet_type"],
-    )
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(filename)s] => %(message)s",
         handlers=[
-            logging.FileHandler(filename=logfilename + ".log"),
+            logging.FileHandler(filename=args["logfilename"] + ".log"),
             logging.StreamHandler(sys.stdout),
         ],
     )
@@ -53,68 +39,45 @@ def _train(args):
     _set_device(args)
     print_args(args)
 
-    model = Learner(args)
-    model.dil_init = False
-    if args["dataset"] == "core50":
-        ds = "core50_s1"
-        dil_tasks = ["s1", "s2", "s4", "s5", "s6", "s8", "s9", "s11"]
-        num_tasks = len(dil_tasks)
-        model.is_dil = True
-    elif args["dataset"] == "cddb":
-        ds = "cddb_gaugan"
-        dil_tasks = ["gaugan", "biggan", "wild", "whichfaceisreal", "san"]
-        num_tasks = len(dil_tasks)
-        model.topk = 2
-        model.is_dil = True
-    # elif args["dataset"] == "domainnet":
-    #     ds = "domainnet_real"
-    #     dil_tasks = ["real", "infograph", "painting", "sketch"]
-    #     num_tasks = len(dil_tasks)
-    #     model.is_dil = True
-    #     args["increment"] = [240, 35, 35, 35]
-    else:
-        # cil datasets
-        model.is_dil = False
-        data_manager = DataManager(
-            args["dataset"],
-            args["shuffle"],
-            args["seed"],
-            args["init_cls"],
-            args["increment"],
-            use_input_norm=args["use_input_norm"],
+    if args.get("use_wandb", False) and wandb.run is None:
+        wandb.init(
+            project=args.get("wandb_project", "SAFE"),
+            name=args.get("wandb_run_name", None),
+            config=args,
+            settings=wandb.Settings(quiet=True),
         )
-        num_tasks = data_manager.nb_tasks
+
+    if args.get("mode", "base") == "base":
+        model = Learner(args)
+    else:
+        model = MetaLearner(args)
+
+    model.dil_init = False
+    model.is_dil = False
+    data_manager = DataManager(
+        args["dataset"],
+        args["first_source"],
+        args["shuffle"],
+        args["seed"],
+        args["init_cls"],
+        args["increment"],
+        use_input_norm=args["use_input_norm"],
+    )
+    num_tasks = data_manager.nb_tasks 
     acc_curve = []
     for i in range(10):
         acc_curve.append({"top1_total": [], "ave_acc": []})
 
     classes_df = None
     logging.info("Pre-trained network parameters: {}".format(count_parameters(model._network)))
-    cnn_matrix = []
     for task in range(num_tasks):
-        if model.is_dil:
-            # reset the data manager to the next domain
-            data_manager = DataManager(
-                args["dataset"] + "_" + dil_tasks[task],
-                args["shuffle"],
-                args["seed"],
-                args["init_cls"],
-                args["increment"][task],
-                use_input_norm=args["use_input_norm"],
-            )
-            model._cur_task = -1
-            model._known_classes = 0
-            model._classes_seen_so_far = 0
 
         if classes_df is None:
             classes_df = pd.DataFrame()
             classes_df["init"] = -1 * np.ones(data_manager._test_data.shape[0])
+
         model.incremental_train(data_manager)
-
         acc_total, acc_grouped, predicted_classes, true_classes = model.eval_task()
-        col1 = "pred_task_" + str(task)
-        col2 = "true_task_" + str(task)
-
         model.after_task()
 
         l = 0
@@ -125,12 +88,28 @@ def _train(args):
 
             acc_curve[l]["top1_total"].append(acc_total)
             acc_curve[l]["ave_acc"].append(m)
-            logging.info("Group Accuracies after this task: {}".format(cur))
+            logging.info("Group Accuracies: {}".format(cur))
             l += 1
         logging.info("Ave Acc curve: {}".format(acc_curve[0]["ave_acc"]))
         logging.info("Top1 curve: {}".format(acc_curve[0]["top1_total"]))
+
+        if args.get("use_wandb", False):
+            wandb.log(
+                {
+                    "task": task,
+                    "task_acc_total": acc_total,
+                    "task_ave_acc": acc_curve[0]["ave_acc"][-1],
+                }
+            )
     logging.info("Finishing run")
     logging.info("")
+
+    if args.get("use_wandb", False):
+        log_dict = {
+            'top1_total': acc_curve[0]["top1_total"][-1],
+        }
+        wandb.log(log_dict)
+        wandb.finish()
     return acc_curve[0]["top1_total"][-1]
 
 
