@@ -42,7 +42,7 @@ class CosineLinear(nn.Module):
         if self.sigma is not None:
             out = self.sigma * out
 
-        return {"logits": out}
+        return out
 
 
 def get_convnet(args, pretrained=False):
@@ -202,9 +202,46 @@ class ResNetCosineIncrementalNet(BaseNet):
         self.fc = fc
 
 
+class StyleAug(nn.Module):
+    def __init__(self, p=0.5, mode="mix", alpha=0.3, tau=0.1):
+        super().__init__()
+        self.p = p
+        self.mode = mode
+        self.alpha = alpha
+        self.tau = tau
+
+    def forward(self, z):
+        # z: (B, N, D)  # ViT patch tokens
+        if not self.training or torch.rand(1).item() > self.p:
+            return z
+
+        B, N, D = z.shape
+        mu = z.mean(dim=1, keepdim=True)      # (B, 1, D)
+        std = z.std(dim=1, keepdim=True) + 1e-6
+
+        z_norm = (z - mu) / std
+
+        if self.mode == "mix":
+            # batch shuffle
+            perm = torch.randperm(B, device=z.device)
+            mu2, std2 = mu[perm], std[perm]
+            lam = torch.distributions.Beta(self.alpha, self.alpha).sample((B,1,1)).to(z.device)
+            mu_t = lam * mu + (1-lam) * mu2
+            std_t = lam * std + (1-lam) * std2
+        else:  # "gauss"
+            noise_mu = torch.randn_like(mu) * self.tau
+            noise_std = torch.randn_like(std) * self.tau
+            mu_t = mu + noise_mu
+            std_t = std + noise_std
+
+        z_aug = std_t * z_norm + mu_t
+        return z_aug
+
+
 class SimpleVitNet(BaseNet):
     def __init__(self, args, pretrained):
         super().__init__(args, pretrained)
+        self.style_aug = StyleAug(p=0.9, mode="mix")
 
     def update_fc(self, nb_classes):
         fc = CosineLinear(self.feature_dim, nb_classes).cuda()
@@ -219,7 +256,28 @@ class SimpleVitNet(BaseNet):
         del self.fc
         self.fc = fc
 
-    def forward(self, x):
-        x = self.convnet(x)
+    def forward(self, x, use_style_aug=False, return_features: bool = False):
+        if use_style_aug:
+            B = x.shape[0]
+            x = self.convnet.patch_embed(x)
+            x = self.style_aug(x)
+            cls_tokens = self.convnet.cls_token.expand(
+                B, -1, -1
+            )  
+            x = torch.cat((cls_tokens, x), dim=1)
+            x = x + self.convnet.pos_embed
+            x = self.convnet.pos_drop(x)
+
+            for idx, blk in enumerate(self.convnet.blocks):
+                x = blk(x)
+
+            x = self.convnet.norm(x)
+            x = x[:, 0]
+            x = self.convnet.head(x)
+        else:
+            x = self.convnet(x)
         out = self.fc(x)
-        return out
+        if return_features:
+            return {"logits": out, "features": x}
+        else:
+            return {"logits": out}
